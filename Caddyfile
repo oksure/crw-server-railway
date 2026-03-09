@@ -1,0 +1,30 @@
+# Caddy listens on Railway's dynamic $PORT (defaults to 8080 for local dev).
+# Using a bare port (not a domain name) disables Caddy's automatic HTTPS,
+# which is correct here because Railway already terminates TLS at its edge.
+:{$PORT:8080} {
+
+    # ── Unauthenticated health-check ──────────────────────────────────────────
+    # Railway's health-check probe and crw-server's native /health both need
+    # this to be reachable without a token.
+    handle /health {
+        reverse_proxy localhost:3000
+    }
+
+    # ── Bearer-token guard ────────────────────────────────────────────────────
+    # Matches any request that does NOT carry the correct Authorization header.
+    @unauthorized not header Authorization "Bearer {$CRW_API_KEY}"
+
+    handle @unauthorized {
+        header Content-Type "application/json"
+        respond `{"success":false,"error":"Unauthorized"}` 401
+    }
+
+    # ── Authenticated traffic → crw-server ────────────────────────────────────
+    handle {
+        reverse_proxy localhost:3000 {
+            # Propagate the real client IP so crw-server logs are meaningful.
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Real-IP      {remote_host}
+        }
+    }
+}
